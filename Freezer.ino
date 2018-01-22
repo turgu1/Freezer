@@ -5,39 +5,41 @@
 
 #include "local/local_params.h"
 
+// ---- Development Mode ----
+
+#define debugging 0
+
+#if debugging
+  #define init_debug() { Serial.begin(9600);  }
+  #define debug(msg)   { Serial.print(msg);   }
+  #define debugln(msg) { Serial.println(msg); }
+#else
+  #define init_debug()
+  #define debug(msg)
+  #define debugln(msg)
+#endif
+
+// ---- Sensor and LED ----
+
 #define LED   16
 #define SWITCH 5
 
 // Create an ESP8266 WiFiClient class to connect to the MQTT server.
 
-WiFiClient client;
-
 // ---- MQTT Server Parameters ----
 
-#define MQTT_ID          "freezerDoorSensor" " " __DATE__ " " __TIME__
+#define MQTT_ID      "freezerDoorSensor" " " __DATE__ " " __TIME__
 
 #define FREEZER_FEED "/feeds/freezer_door"
 
 // ---- Global State (you don't need to change this!) ----
 
-PubSubClient mqtt(client);
-
-//#define debug(msg)   { Serial.print(msg);   }
-//#define debugln(msg) { Serial.println(msg); }
-
-#define debug(msg)
-#define debugln(msg)
-
-void WIFI_connect();
-void MQTT_connect();
-void MQTT_publish(const char * feed, const char * msg);
-void blink_led();
+WiFiClient   wifi_client;
+PubSubClient mqtt(wifi_client);
 
 void setup()
 {
-  delay(2000);
-  
-  // put your setup code here, to run once:
+  delay(200);
   
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
@@ -45,21 +47,15 @@ void setup()
   pinMode(SWITCH, INPUT_PULLUP);
   digitalWrite(SWITCH, HIGH);
 
-  Serial.begin(9600);
-  
-  WIFI_connect();
-  
-  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
-  
-  MQTT_connect();
+  init_debug();
+  delay(10);
 }
 
 void loop()
 { 
   // Ensure that MQTT is still connected
 
-  if (WiFi.status() != WL_CONNECTED) WIFI_connect();
-  if (!mqtt.loop()) MQTT_connect();
+  MQTT_connect();
   
   // Publish data
 
@@ -90,24 +86,38 @@ void blink()
 
 void WIFI_connect()
 {
+  if (WiFi.status() == WL_CONNECTED) return;
+
   // Connect to WiFi access point.
-  delay(10);
+
+  debug(F("Connecting to "));
+  debugln(WLAN_SSID);
 
   debug("MAC: ");
   debugln(WiFi.macAddress());
   
-  debug(F("Connecting to "));
-  debugln(WLAN_SSID);
+  do {
+    int count = 20;
 
-  WiFi.begin(WLAN_SSID, WLAN_PASS);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    debug(F("."));
-  }
-  debugln();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WLAN_SSID, WLAN_PASSWD);
+    delay(1);
 
+    while ((count--) && (WiFi.status() != WL_CONNECTED)) {
+      delay(1000);
+      debug(F("."));
+    }
+    debugln();
+
+    if (WiFi.status() != WL_CONNECTED) {
+      //WiFi.mode(WIFI_OFF);
+      delay(500);
+    }
+  } while (WiFi.status() != WL_CONNECTED);
+  
   debugln(F("WiFi connected"));
-  debugln(F("IP address: "));
+  
+  debug(F("IP address: "  ));
   debugln(WiFi.localIP());  
 }
 
@@ -129,13 +139,14 @@ void MQTT_publish(const char * feed, const char * msg)
 
 void MQTT_connect() 
 {
+  // Return if already connected.
+
+  if (mqtt.loop()) return;
   
-  int8_t ret;
-
-  // Stop if already connected.
-
-  if (mqtt.connected()) return;
-
+  WIFI_connect();
+  
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  
   debug(F("Trying to connect to MQTT Server with ID: "));
   debugln(MQTT_ID);
   
@@ -155,6 +166,8 @@ void MQTT_connect()
     }
     
     delay(5000);  // wait 5 seconds
+
+    WIFI_connect();
   }
 
   debugln(F("Connected"));
